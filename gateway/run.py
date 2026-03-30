@@ -1516,6 +1516,13 @@ class GatewayRunner:
             adapter.gateway_runner = self  # For cross-platform delivery
             return adapter
 
+        elif platform == Platform.LIVEKIT:
+            from gateway.platforms.livekit import LiveKitAdapter, check_livekit_requirements
+            if not check_livekit_requirements():
+                logger.warning("LiveKit: livekit SDK not installed or LIVEKIT_URL/API_KEY/API_SECRET not set")
+                return None
+            return LiveKitAdapter(config)
+
         return None
     
     def _is_user_authorized(self, source: SessionSource) -> bool:
@@ -1553,6 +1560,7 @@ class GatewayRunner:
             Platform.MATRIX: "MATRIX_ALLOWED_USERS",
             Platform.DINGTALK: "DINGTALK_ALLOWED_USERS",
             Platform.FEISHU: "FEISHU_ALLOWED_USERS",
+            Platform.LIVEKIT: "LIVEKIT_ALLOWED_USERS",
         }
         platform_allow_all_map = {
             Platform.TELEGRAM: "TELEGRAM_ALLOW_ALL_USERS",
@@ -1566,6 +1574,7 @@ class GatewayRunner:
             Platform.MATRIX: "MATRIX_ALLOW_ALL_USERS",
             Platform.DINGTALK: "DINGTALK_ALLOW_ALL_USERS",
             Platform.FEISHU: "FEISHU_ALLOW_ALL_USERS",
+            Platform.LIVEKIT: "LIVEKIT_ALLOW_ALL_USERS",
         }
 
         # Per-platform allow-all flag (e.g., DISCORD_ALLOW_ALL_USERS=true)

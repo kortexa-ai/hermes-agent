@@ -256,6 +256,13 @@ PLATFORM_HINTS = {
         "only — no markdown, no formatting. SMS messages are limited to ~1600 "
         "characters, so be brief and direct."
     ),
+    "livekit": (
+        "You are communicating via a LiveKit voice channel (WebRTC). "
+        "The user speaks to you and hears your replies as audio. "
+        "Keep responses concise and conversational — they will be read aloud via TTS. "
+        "Avoid markdown formatting, long lists, code blocks, or URLs. "
+        "Do not include MEDIA: tags. Focus on clear, spoken-word responses."
+    ),
 }
 
 CONTEXT_FILE_MAX_CHARS = 20_000

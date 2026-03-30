@@ -130,6 +130,7 @@ def _handle_send(args):
         "homeassistant": Platform.HOMEASSISTANT,
         "dingtalk": Platform.DINGTALK,
         "feishu": Platform.FEISHU,
+        "livekit": Platform.LIVEKIT,
         "email": Platform.EMAIL,
         "sms": Platform.SMS,
     }
@@ -368,6 +369,8 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
             result = await _send_dingtalk(pconfig.extra, chat_id, chunk)
         elif platform == Platform.FEISHU:
             result = await _send_feishu(pconfig, chat_id, chunk, thread_id=thread_id)
+        elif platform == Platform.LIVEKIT:
+            result = {"error": "LiveKit is a real-time voice channel — use voice replies instead of send_message."}
         else:
             result = {"error": f"Direct sending not yet implemented for {platform.value}"}
 

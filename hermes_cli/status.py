@@ -18,6 +18,18 @@ from hermes_cli.models import provider_label
 from hermes_cli.runtime_provider import resolve_requested_provider
 from hermes_constants import OPENROUTER_MODELS_URL
 
+# Shared platform registry — used by both `hermes status` and `hermes config`
+MESSAGING_PLATFORMS = {
+    "Telegram": ("TELEGRAM_BOT_TOKEN", "TELEGRAM_HOME_CHANNEL"),
+    "Discord": ("DISCORD_BOT_TOKEN", "DISCORD_HOME_CHANNEL"),
+    "WhatsApp": ("WHATSAPP_ENABLED", None),
+    "Signal": ("SIGNAL_HTTP_URL", "SIGNAL_HOME_CHANNEL"),
+    "Slack": ("SLACK_BOT_TOKEN", None),
+    "Email": ("EMAIL_ADDRESS", "EMAIL_HOME_ADDRESS"),
+    "SMS": ("TWILIO_ACCOUNT_SID", "SMS_HOME_CHANNEL"),
+    "LiveKit": ("LIVEKIT_URL", None),
+}
+
 def check_mark(ok: bool) -> str:
     if ok:
         return color("✓", Colors.GREEN)
@@ -246,17 +258,7 @@ def show_status(args):
     print()
     print(color("◆ Messaging Platforms", Colors.CYAN, Colors.BOLD))
     
-    platforms = {
-        "Telegram": ("TELEGRAM_BOT_TOKEN", "TELEGRAM_HOME_CHANNEL"),
-        "Discord": ("DISCORD_BOT_TOKEN", "DISCORD_HOME_CHANNEL"),
-        "WhatsApp": ("WHATSAPP_ENABLED", None),
-        "Signal": ("SIGNAL_HTTP_URL", "SIGNAL_HOME_CHANNEL"),
-        "Slack": ("SLACK_BOT_TOKEN", None),
-        "Email": ("EMAIL_ADDRESS", "EMAIL_HOME_ADDRESS"),
-        "SMS": ("TWILIO_ACCOUNT_SID", "SMS_HOME_CHANNEL"),
-    }
-    
-    for name, (token_var, home_var) in platforms.items():
+    for name, (token_var, home_var) in MESSAGING_PLATFORMS.items():
         token = os.getenv(token_var, "")
         has_token = bool(token)
         
