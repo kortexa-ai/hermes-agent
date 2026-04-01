@@ -68,6 +68,7 @@ class Platform(Enum):
     BLUEBUBBLES = "bluebubbles"
     QQBOT = "qqbot"
     YUANBAO = "yuanbao"
+    LIVEKIT = "livekit"
 
 
 @dataclass
@@ -337,7 +338,10 @@ class GatewayConfig:
                 config.extra.get("client_secret") or os.getenv("DINGTALK_CLIENT_SECRET")
             ):
                 connected.append(platform)
-        
+            # LiveKit uses extra dict for server URL + API credentials
+            elif platform == Platform.LIVEKIT and config.extra.get("url"):
+                connected.append(platform)
+
         return connected
     
     def get_home_channel(self, platform: Platform) -> Optional[HomeChannel]:
@@ -1356,6 +1360,23 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
         yuanbao_group_allow_from = os.getenv("YUANBAO_GROUP_ALLOW_FROM")
         if yuanbao_group_allow_from:
             extra["group_allow_from"] = yuanbao_group_allow_from
+
+    # LiveKit
+    livekit_url = os.getenv("LIVEKIT_URL")
+    livekit_api_key = os.getenv("LIVEKIT_API_KEY")
+    livekit_api_secret = os.getenv("LIVEKIT_API_SECRET")
+    if livekit_url and livekit_api_key and livekit_api_secret:
+        if Platform.LIVEKIT not in config.platforms:
+            config.platforms[Platform.LIVEKIT] = PlatformConfig()
+        config.platforms[Platform.LIVEKIT].enabled = True
+        config.platforms[Platform.LIVEKIT].extra.update({
+            "url": livekit_url,
+            "api_key": livekit_api_key,
+            "api_secret": livekit_api_secret,
+            "room": os.getenv("LIVEKIT_ROOM", "hermes"),
+            "agent_name": os.getenv("LIVEKIT_AGENT_NAME", "Hermes"),
+            "agent_avatar": os.getenv("LIVEKIT_AGENT_AVATAR", ""),
+        })
 
     # Session settings
     idle_minutes = os.getenv("SESSION_IDLE_MINUTES")
