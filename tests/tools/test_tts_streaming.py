@@ -28,6 +28,33 @@ pytest.importorskip("numpy")
 
 
 class TestSentenceChunker:
+    @pytest.mark.parametrize("first_min_len", [None, 1, 6])
+    @pytest.mark.parametrize("split_at", range(6))
+    def test_first_threshold_ends_at_first_nonempty_emission(self, first_min_len, split_at):
+        c = ts.SentenceChunker(first_min_len=first_min_len)
+        assert c.feed("<think>private</think>") == []
+        assert c.flush() == []  # An empty flush must not consume the first-sentence override.
+        opener = "Yes. "
+        opening = c.feed(opener[:split_at]) + c.feed(opener[split_at:])
+        assert opening == ([opener] if first_min_len == 1 else [])
+        assert c.feed("OK. ") == []  # Later short sentences still batch normally.
+        rest = c.feed("This is the longer sentence. Tail")
+        assert rest == ["OK. This is the longer sentence. " if opening else
+                        "Yes. OK. This is the longer sentence. "]
+        assert c.flush() == ["Tail"]
+        assert c.flush() == []
+        assert "".join(opening + rest + ["Tail"]) == "Yes. OK. This is the longer sentence. Tail"
+
+        # Several sentences in one delta obey the same first-only rule.
+        batched = ts.SentenceChunker(first_min_len=first_min_len)
+        assert batched.feed("Yes. OK. This is the longer sentence. ") == opening + rest
+
+        # An idle flush of a nonempty tail counts as the first emitted sentence.
+        idle = ts.SentenceChunker(first_min_len=first_min_len)
+        assert idle.feed("Hi") == []
+        assert idle.flush() == ["Hi"]
+        assert idle.feed("OK. ") == []
+
     def test_cuts_sentence_the_moment_its_boundary_arrives(self):
         c = ts.SentenceChunker()
         assert c.feed("This is the first full") == []
