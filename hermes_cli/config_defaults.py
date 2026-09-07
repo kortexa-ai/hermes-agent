@@ -1056,6 +1056,9 @@ DEFAULT_CONFIG = {
             # Shortest first sentence (chars) spoken on its own by streaming TTS; shorter openers
             # ride with the next sentence. 20 suits English; CJK voice setups use ~6.
             "min_len": 20,
+            # Maximum wait for spoken output after text generation finishes;
+            # not a delay before playback. Finite seconds, range 1–600.
+            "completion_timeout": 120.0,
         },
         "edge": {
             # Popular: AriaNeural, JennyNeural, AndrewNeural, BrianNeural, SoniaNeural
