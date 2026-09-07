@@ -75,21 +75,31 @@ _THINK_OPEN_RE = re.compile(rf"<(?:{_THINK_NAMES})(?=[\s>]|$)", flags=re.IGNOREC
 class SentenceChunker:
     """Incremental sentence cutter for LLM token deltas, shared by the speaker pipeline and the
     speak-stream WebSocket so every surface cuts speech identically. Strips ``<think>`` blocks (even
-    split across deltas) and merges fragments shorter than *min_len* into the following sentence."""
+    split across deltas) and merges fragments shorter than *min_len* into the following sentence.
+    *first_min_len* can release a short opener sooner without changing later batching."""
 
-    def __init__(self, min_len: int = 20):
+    def __init__(self, min_len: int = 20, *, first_min_len: Optional[int] = None):
         self.min_len = min_len
+        self._next_min_len = min_len if first_min_len is None else first_min_len
         self.buf = ""
 
     @classmethod
     def from_config(cls, tts_config: dict) -> SentenceChunker:
         """Chunker honouring ``tts.streaming.min_len``. 20 suits English; a CJK opener of 5–7
         characters is a whole clause, so voice setups lower it to speak the first sentence
-        alone instead of buffering it behind the second. Floor 1: 0 would emit every boundary."""
+        alone instead of buffering it behind the second. Floor 1: 0 would emit every boundary.
+        ``first_sentence_min_chars`` overrides only the first emission on every speech surface."""
+        streaming = tts_config.get("streaming") if isinstance(tts_config, dict) else None
+        streaming = streaming if isinstance(streaming, dict) else {}
         try:
-            return cls(min_len=max(1, int((tts_config.get("streaming") or {}).get("min_len", 20))))
-        except (AttributeError, TypeError, ValueError):  # non-mapping / non-numeric → default
-            return cls()
+            min_len = max(1, int(streaming.get("min_len", 20)))
+        except (TypeError, ValueError):  # non-numeric → default
+            min_len = 20
+        first_min_len = streaming.get("first_sentence_min_chars")
+        if first_min_len is not None and (type(first_min_len) is not int or first_min_len < 1):
+            logger.warning("Invalid tts.streaming.first_sentence_min_chars; using min_len")
+            first_min_len = None
+        return cls(min_len=min_len, first_min_len=first_min_len)
 
     def feed(self, delta: str) -> list[str]:
         """Absorb *delta*; return every complete sentence now ready to speak."""
@@ -100,10 +110,11 @@ class SentenceChunker:
         start = 0  # skip boundaries that would leave the head too short
         while m := SENTENCE_BOUNDARY_RE.search(self.buf, start):
             head = self.buf[: m.end()]
-            if len(head.strip()) < self.min_len:
+            if len(head.strip()) < self._next_min_len:
                 start = m.end()
                 continue
             out.append(head)
+            self._next_min_len = self.min_len
             self.buf = self.buf[m.end():]
             start = 0
         return out
@@ -114,6 +125,8 @@ class SentenceChunker:
         if m := _THINK_OPEN_RE.search(tail):
             tail = tail[: m.start()]  # unterminated reasoning block: never speak it
         tail = tail.strip()
+        if tail:
+            self._next_min_len = self.min_len
         return [tail] if tail else []
 
 
