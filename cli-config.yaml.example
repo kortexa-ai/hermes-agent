@@ -1582,6 +1582,14 @@ platform_toolsets:
 #     telegram:
 #       max_file_bytes: 52428800
 #       safety_ratio: 0.85
+#   streaming:
+#     # Positive integer or null; null inherits streaming.min_len (default 20).
+#     # Set to 1 to start a complete short opener (e.g. "Yes.") at its sentence
+#     # boundary. Only the first emitted sentence uses this threshold; later
+#     # sentences keep streaming.min_len. Applies to the gateway, CLI
+#     # speaker pipeline, and speak-stream WebSocket. Does not change punctuation
+#     # detection; an idle/end-of-text flush also counts as the first emission.
+#     first_sentence_min_chars: null
 #   gemini:
 #     model: "gemini-3.1-flash-tts-preview"
 #     voice: "Kore"
