@@ -2704,7 +2704,10 @@ class BasePlatformAdapter(ABC):
         return None
 
     async def write_streaming_tts(self, handle: StreamingTTSHandle, chunk: bytes) -> None:
-        """Write one PCM chunk to the adapter's outbound audio track."""
+        """Write PCM, setting ``handle.audible`` only after playable audio is
+        accepted by the output sink. Buffered partial samples are not audible.
+        Once true, the flag must remain true so failures never replay speech.
+        """
 
     async def finish_streaming_tts(self, handle: StreamingTTSHandle, *, interrupted: bool = False) -> None:
         """Signal normal end of the audio stream."""

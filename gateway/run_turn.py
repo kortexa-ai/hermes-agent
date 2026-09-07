@@ -3278,7 +3278,7 @@ class GatewayTurnMixin:
             return
         _stts.finish()
         try:
-            await _stts.wait_complete(timeout=10.0)
+            await _stts.wait_complete()
         except Exception as _stts_done_err:
             logger.debug("streaming TTS wait_complete error: %s", _stts_done_err)
         if not _stts.done:

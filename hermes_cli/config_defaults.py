@@ -997,6 +997,11 @@ DEFAULT_CONFIG = {
         # "edge" (free) | "elevenlabs" (premium) | "openai" | "xai" | "minimax" | "mistral" |
         # "gemini" | "deepinfra" | "neutts" (local) | "kittentts" (local) | "piper" (local)
         "provider": "edge",
+        "streaming": {
+            # Maximum wait for spoken output after text generation finishes;
+            # not a delay before playback. Finite seconds, range 1–600.
+            "completion_timeout": 120.0,
+        },
         "edge": {
             # Popular: AriaNeural, JennyNeural, AndrewNeural, BrianNeural, SoniaNeural
             "voice": "en-US-AriaNeural",

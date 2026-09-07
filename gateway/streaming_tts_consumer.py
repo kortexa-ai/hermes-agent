@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import queue
 import threading
 from typing import Any, Dict, Optional
@@ -24,6 +25,16 @@ _ABORT = object()
 _DONE = object()
 
 
+def _completion_timeout(tts_config: Dict[str, Any]) -> float:
+    streaming = tts_config.get("streaming")
+    value = streaming.get("completion_timeout", 120.0) if isinstance(streaming, dict) else 120.0
+    if (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and 1.0 <= value <= 600.0 and math.isfinite(value)):
+        return float(value)
+    logger.warning("Invalid tts.streaming.completion_timeout; using 120 seconds")
+    return 120.0
+
+
 class StreamingTTSConsumer:
     """Consumes LLM text deltas and produces streaming PCM audio for an adapter."""
 
@@ -34,6 +45,7 @@ class StreamingTTSConsumer:
         self._adapter, self._chat_id, self._loop, self._metadata = adapter, chat_id, loop, metadata
         # Resolved once; None => inactive, gateway falls back to whole-file TTS.
         self._streamer = resolve_streaming_provider(tts_config)
+        self._completion_timeout = _completion_timeout(tts_config)
         self._chunker = SentenceChunker()
         self._audio_format = audio_format or AudioFormat() if self._streamer is None else (
             AudioFormat(**{f: int(getattr(self._streamer, f, getattr(AudioFormat, f)))
@@ -110,7 +122,8 @@ class StreamingTTSConsumer:
     def _settle(self, *, failed: bool) -> None:
         """Set outcome flags from what was audible: never report completion after a failure or a
         dropped clause; keep suppression whenever audio was audible (no replay from the start)."""
-        audible, degraded = self._handle.audible, failed or self._dropped
+        audible = self._handle.audible
+        degraded = failed or self._dropped or self._aborted or self._handle.aborted
         self._completed = audible and not degraded
         self._partial = self._partial or (audible and degraded)
         self._suppress_whole_file = audible
@@ -165,6 +178,9 @@ class StreamingTTSConsumer:
                     await self._safe_abort("finish_streaming_tts failed")
                 else:
                     self._settle(failed=False)
+        except asyncio.CancelledError:
+            await self._safe_abort("streaming TTS task cancelled")
+            raise
         except Exception as exc:
             logger.warning("streaming TTS consumer error: %s", exc)
             await self._safe_abort(str(exc))
@@ -193,10 +209,10 @@ class StreamingTTSConsumer:
                 return
             if not chunk:
                 continue
-            was_audible = self._handle.audible
             await self._adapter.write_streaming_tts(self._handle, chunk)
-            if not was_audible:
-                self._handle.audible = self._suppress_whole_file = True
+            # Only the sink knows whether this chunk produced playable frames.
+            # A resampler may buffer it without sending anything at all.
+            self._suppress_whole_file = self._handle.audible
 
     async def _safe_abort(self, reason: str) -> None:
         """Abort the adapter stream, swallowing errors (idempotent)."""
@@ -208,6 +224,7 @@ class StreamingTTSConsumer:
         finally:
             if self._handle:
                 self._handle.aborted = True
+                self._settle(failed=True)
 
     def abort(self, reason: str = "cancelled") -> None:
         """Idempotent cancellation from any thread."""
@@ -222,9 +239,24 @@ class StreamingTTSConsumer:
             with contextlib.suppress(Exception):
                 self._loop.call_soon_threadsafe(asyncio.create_task, self._safe_abort(reason))
 
-    async def wait_complete(self, timeout: float = 10.0) -> bool:
-        """Wait for the drain task to finish. Returns True only on full success."""
+    async def wait_complete(self, timeout: Optional[float] = None) -> bool:
+        """Wait for playout, bounded by ``tts.streaming.completion_timeout``.
+
+        This is a completion budget, not a delay before playback. Explicit
+        timeout values remain available for short cancellation cleanup waits.
+        """
         if self._task is not None:
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await asyncio.wait_for(asyncio.shield(self._task), timeout=timeout)
+            try:
+                await asyncio.wait_for(asyncio.shield(self._task), timeout=(
+                    self._completion_timeout if timeout is None else timeout
+                ))
+            except asyncio.CancelledError:
+                if asyncio.current_task().cancelling():
+                    self.abort("streaming TTS waiter cancelled")
+                    raise
+                # An aborted sink may cancel its blocked write task.
+            except asyncio.TimeoutError:
+                pass
+            except Exception:
+                logger.debug("streaming TTS wait failed", exc_info=True)
         return self._completed
