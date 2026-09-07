@@ -191,9 +191,84 @@ def _make_consumer(adapter, chat_id, loop, streamer):
     consumer._dropped = False
     consumer._suppress_whole_file = False
     consumer._task = None
+    consumer._completion_timeout = 120.0
     consumer._lock = threading.Lock()
     consumer._strip_markdown = None
     return consumer
+
+
+@pytest.mark.parametrize("value, expected", [
+    (30, 30.0), (150.5, 150.5), (True, 120.0), (0, 120.0),
+    (601, 120.0), (float("nan"), 120.0), (float("inf"), 120.0), ("30", 120.0),
+])
+def test_completion_budget_uses_valid_profile_configuration(value, expected, monkeypatch):
+    async def run(loop):
+        monkeypatch.setattr("tools.tts_streaming.resolve_streaming_provider", lambda config: FakeStreamer())
+        consumer = StreamingTTSConsumer(
+            FakeVoiceAdapter(), "chat", {"streaming": {"completion_timeout": value}}, loop,
+        )
+        assert consumer._completion_timeout == expected
+    _run_test(run)
+
+
+def test_completion_budget_flows_from_the_profile_loader(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    (tmp_path / "config.yaml").write_text("tts:\n  streaming:\n    completion_timeout: 45\n")
+    monkeypatch.setattr("tools.tts_streaming.resolve_streaming_provider", lambda config: FakeStreamer())
+
+    async def run(loop):
+        from tools.tts_tool import _load_tts_config
+        consumer = StreamingTTSConsumer(FakeVoiceAdapter(), "chat", _load_tts_config(), loop)
+        assert consumer._completion_timeout == 45
+    _run_test(run)
+
+
+def test_buffered_write_failure_keeps_whole_file_fallback_available():
+    async def run(loop):
+        adapter = FakeVoiceAdapter()
+        # The first chunk is buffered successfully, but not yet playable.
+        async def write(handle, chunk):
+            adapter.written_chunks.append(chunk)
+        adapter.write_streaming_tts = write
+        consumer = _make_consumer(adapter, "chat", loop, FakeStreamer(fail_on_clause=2))
+        consumer.start()
+        consumer.on_delta("A sentence that remains buffered. Another sentence that fails. ")
+        consumer.finish()
+        await consumer.wait_complete(timeout=5)
+        assert adapter.written_chunks
+        assert not consumer.audible and not consumer.suppress_whole_file
+        assert not consumer.completed
+    _run_test(run)
+
+
+@pytest.mark.parametrize("cancel_waiter", [False, True])
+def test_cancellation_releases_audio_and_keeps_partial_suppression(cancel_waiter):
+    async def run(loop):
+        adapter = FakeVoiceAdapter()
+        waiting, released = asyncio.Event(), asyncio.Event()
+        async def finish(handle, **kwargs):
+            waiting.set()
+            await released.wait()
+        async def abort(handle, **kwargs):
+            adapter.abort_count += 1
+            handle.aborted = True
+            released.set()
+        adapter.finish_streaming_tts, adapter.abort_streaming_tts = finish, abort
+        consumer = _make_consumer(adapter, "chat", loop, FakeStreamer())
+        task = consumer.start()
+        consumer.on_delta("Audio plays before this task is cancelled. ")
+        consumer.finish()
+        await asyncio.wait_for(waiting.wait(), 5)
+        target = asyncio.create_task(consumer.wait_complete()) if cancel_waiter else task
+        await asyncio.sleep(0)
+        target.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await target
+        await asyncio.wait_for(released.wait(), 5)
+        await consumer.wait_complete(timeout=5)
+        assert adapter.abort_count >= 1 and adapter.handle.aborted
+        assert consumer.partial and consumer.suppress_whole_file and not consumer.completed
+    _run_test(run)
 
 
 def _run_test(coro_factory, timeout=10.0):
