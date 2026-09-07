@@ -46,7 +46,7 @@ class StreamingTTSConsumer:
         # Resolved once; None => inactive, gateway falls back to whole-file TTS.
         self._streamer = resolve_streaming_provider(tts_config)
         self._completion_timeout = _completion_timeout(tts_config)
-        self._chunker = SentenceChunker()
+        self._chunker = SentenceChunker.from_config(tts_config)
         self._audio_format = audio_format or AudioFormat() if self._streamer is None else (
             AudioFormat(**{f: int(getattr(self._streamer, f, getattr(AudioFormat, f)))
                            for f in ("sample_rate", "channels", "sample_width")})

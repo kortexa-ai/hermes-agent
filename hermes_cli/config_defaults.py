@@ -1001,6 +1001,8 @@ DEFAULT_CONFIG = {
             # Maximum wait for spoken output after text generation finishes;
             # not a delay before playback. Finite seconds, range 1–600.
             "completion_timeout": 120.0,
+            # Lower only the first sentence's threshold; subsequent sentences still batch at 20.
+            "first_sentence_min_chars": 20,
         },
         "edge": {
             # Popular: AriaNeural, JennyNeural, AndrewNeural, BrianNeural, SoniaNeural
