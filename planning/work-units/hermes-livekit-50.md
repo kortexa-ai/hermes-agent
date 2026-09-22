@@ -16,9 +16,10 @@ Upstream proposal: [hermes-agent#105235](https://github.com/NousResearch/hermes-
 
 ## Behavior and configuration
 
-`tts.streaming.first_sentence_min_chars` is a positive integer, default 20. Mira uses
+`tts.streaming.first_sentence_min_chars` is a positive integer or null. Null inherits
+`tts.streaming.min_len`, whose default is 20. Mira uses
 1 so a complete short opener can reach synthesis before the next sentence arrives.
-Only the first nonempty emission uses the override; later sentences still use 20.
+Only the first nonempty emission uses the override; later sentences use `min_len`.
 The gateway, CLI speaker, and speak-stream WebSocket share the same parser.
 
 Apply profile settings through `hermes --profile mira config set`, not by rewriting
