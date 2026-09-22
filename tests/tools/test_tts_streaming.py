@@ -26,6 +26,25 @@ pytest.importorskip("numpy")
 
 
 class TestSentenceChunker:
+    @pytest.mark.parametrize("min_len", [6, 20])
+    @pytest.mark.parametrize("first_min_len", [None, 1, False])
+    def test_profile_thresholds_preserve_general_batching(self, tmp_path, monkeypatch, min_len, first_min_len):
+        import yaml
+        from tools.tts_tool import _load_tts_config
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        streaming = {"min_len": min_len}
+        if first_min_len is not None:
+            streaming["first_sentence_min_chars"] = first_min_len
+        (tmp_path / "config.yaml").write_text(yaml.safe_dump({"tts": {"streaming": streaming}}))
+        chunker = ts.SentenceChunker.from_config(_load_tts_config())
+
+        tuned = first_min_len == 1
+        assert chunker.feed("Yes. ") == (["Yes. "] if tuned else [])
+        sentence = "This sentence exceeds either configured threshold. "
+        assert chunker.feed(sentence) == ([sentence] if tuned else ["Yes. " + sentence])
+        assert chunker.feed("Ready. ") == (["Ready. "] if min_len == 6 else [])
+
     @pytest.mark.parametrize("first_min_len", [None, 1, 6])
     @pytest.mark.parametrize("split_at", range(6))
     def test_first_threshold_ends_at_first_nonempty_emission(self, first_min_len, split_at):
