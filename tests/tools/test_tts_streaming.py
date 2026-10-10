@@ -31,7 +31,7 @@ class TestSentenceChunker:
     @pytest.mark.parametrize("min_len", [6, 20])
     @pytest.mark.parametrize("first_min_len", [None, 1, False])
     def test_profile_thresholds_preserve_general_batching(self, tmp_path, monkeypatch, min_len, first_min_len):
-        import yaml
+        import hermes_yaml as yaml
         from tools.tts_tool import _load_tts_config
 
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))

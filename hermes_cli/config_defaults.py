@@ -4,6 +4,8 @@ Pure-data leaf module — must not import from hermes_cli.config. Comments are t
 docs of config.yaml.
 """
 
+from hermes_cli.config_defaults_tts import STREAMING_TTS_DEFAULTS
+
 
 #: Image every container terminal backend (docker/modal/daytona/singularity) uses unless the
 #: user pins one. LEGACY_SANDBOX_IMAGES are the plain defaults that preceded the desktop stack
@@ -1081,16 +1083,7 @@ DEFAULT_CONFIG = {
         # turns off, so a quick re-activation (wake word, voice-chat restart) skips the reload.
         # 0 unloads immediately.
         "keep_warm_seconds": 60,
-        "streaming": {
-            # Shortest first sentence (chars) spoken on its own by streaming TTS; shorter openers
-            # ride with the next sentence. 20 suits English; CJK voice setups use ~6.
-            "min_len": 20,
-            # Maximum wait for spoken output after text generation finishes;
-            # not a delay before playback. Finite seconds, range 1–600.
-            "completion_timeout": 120.0,
-            # Override only the first sentence; null inherits min_len for all sentences.
-            "first_sentence_min_chars": None,
-        },
+        "streaming": STREAMING_TTS_DEFAULTS,
         "edge": {
             # Popular: AriaNeural, JennyNeural, AndrewNeural, BrianNeural, SoniaNeural
             "voice": "en-US-AriaNeural",
