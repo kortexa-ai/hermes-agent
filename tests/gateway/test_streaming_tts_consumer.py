@@ -24,7 +24,7 @@ from tools.tts_streaming import SentenceChunker
 
 @pytest.mark.parametrize("value", [None, 1, 6, 20, 0, -1, True, "1", 1.5, float("inf")])
 def test_profile_first_sentence_threshold_preserves_later_batching(value, tmp_path, monkeypatch):
-    import yaml
+    import hermes_yaml as yaml
     from tools.tts_tool import _load_tts_config
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
