@@ -879,8 +879,8 @@ def _iter_option_values(segment: list[str], start: int, option: str) -> Iterator
             yield token[len(prefix):]
 
 
-def _references_at(segment: list[str], index: int, cwd: Optional[str]) -> Iterator[Path]:
-    """Yield the scripts the token at *index* executes, if any."""
+def _references_at(segment: list[str], index: int, cwd: Optional[str]) -> Iterator[tuple[Path, bool]]:
+    """Yield ``(path, forced_shell)`` for scripts executed by the token at *index*."""
     if index >= len(segment):
         return
     executable = segment[index]
@@ -888,7 +888,7 @@ def _references_at(segment: list[str], index: int, cwd: Optional[str]) -> Iterat
 
     if executable_name in {".", "source"}:
         if len(segment) > index + 1:
-            yield from _resolved_or_nothing(segment[index + 1], cwd)
+            yield from ((path, True) for path in _resolved_or_nothing(segment[index + 1], cwd))
         return
 
     if executable_name in _SHELL_EXECUTABLES:
@@ -909,17 +909,17 @@ def _references_at(segment: list[str], index: int, cwd: Optional[str]) -> Iterat
                 continue
             break
         if arg_index < len(arguments) and arguments[arg_index] not in _SHELL_COMMAND_FLAGS:
-            yield from _resolved_or_nothing(arguments[arg_index], cwd)
+            yield from ((path, True) for path in _resolved_or_nothing(arguments[arg_index], cwd))
         return
 
     # A bare "/" is pathlib's division operator in Python sources, not an executable; resolving it
     # hits the filesystem root and fails the regular-file check, hard-blocking innocent .py scripts.
     if executable.strip("/") and ("/" in executable or executable.endswith((".sh", ".bash", ".zsh"))):
-        yield from _resolved_or_nothing(executable, cwd)
+        yield from ((path, False) for path in _resolved_or_nothing(executable, cwd))
 
 
-def _iter_referenced_shell_scripts(command: str, *, cwd: Optional[str] = None) -> Iterator[Path]:
-    """Yield scripts executed directly or through a POSIX shell. Each segment is read at the
+def _iter_referenced_shell_scripts(command: str, *, cwd: Optional[str] = None) -> Iterator[tuple[Path, bool]]:
+    """Yield ``(path, forced_shell)`` for scripts executed directly or through a POSIX shell. Each segment is read at the
     original token AND at the peeled wrapper target — additive on purpose: peeling must never REMOVE
     a reference (a local ``./timeout`` is a script, not the coreutils wrapper)."""
     for segment in _iter_command_segments(command):
@@ -1091,8 +1091,10 @@ def _read_script_for_scanning(script_path: str) -> tuple[str, Optional[str]]:
 # --- recursive walk ---------------------------------------------------------------------------
 
 def _contains_unsafe_gateway_action(
-    command: str, *, cwd: Optional[str], depth: int, visited: set[Path], budget: _LifecycleScanBudget,
+    command: str, *, cwd: Optional[str], depth: int,
+    visited: dict[Path, set[tuple[bool, bool]]], budget: _LifecycleScanBudget,
     read_remote_script: Optional[_ReadRemoteScriptFn] = None, executed: bool = True,
+    shell_source: bool = True,
 ) -> bool:
     """``executed=False`` means *command* is the content of a file that is only MENTIONED in inert
     (masked) text: it is still scanned for a literal lifecycle command, but "could not scan" (budget,
@@ -1102,13 +1104,15 @@ def _contains_unsafe_gateway_action(
         return _budget_exhausted(budget, "text", depth) if executed else False
     if _direct_lifecycle_scan(command):
         return True
+    if not shell_source:
+        return False
     if depth >= _MAX_REFERENCED_SCRIPT_DEPTH:
         return executed
 
-    def recurse(text: str, cwd: Optional[str], executed: bool) -> bool:
+    def recurse(text: str, cwd: Optional[str], executed: bool, *, shell_source: bool = True) -> bool:
         return _contains_unsafe_gateway_action(
             text, cwd=cwd, depth=depth + 1, visited=visited, budget=budget,
-            read_remote_script=read_remote_script, executed=executed,
+            read_remote_script=read_remote_script, executed=executed, shell_source=shell_source,
         )
 
     # The walks below must see the same masked view `_direct_lifecycle_scan` sees (#110422): a
@@ -1126,11 +1130,11 @@ def _contains_unsafe_gateway_action(
     # `/x/restart.sh` to os.system() executes it. Only the fail-closed verdicts (cloud placeholder,
     # oversized/binary, budget) stay restricted to the executed view — a mere data mention must not
     # trip them. Executed candidates come first so a mention never starves a real script's budget.
-    candidates = [(path, executed) for path in _iter_referenced_shell_scripts(walk_command, cwd=cwd)]
-    if walk_command != command:
-        candidates += [(path, False) for path in _iter_referenced_shell_scripts(command, cwd=cwd)]
+    from cron.lifecycle_guard_source import referenced_script_candidates, uses_node_interpreter
 
-    for script_path, candidate_executed in candidates:
+    candidates = referenced_script_candidates(command, walk_command, cwd=cwd, executed=executed)
+
+    for script_path, candidate_executed, forced_shell in candidates:
         # Do not touch a FileProvider path even to discover whether the file is hydrated.
         if _on_cloud_path(script_path):
             if candidate_executed:
@@ -1141,13 +1145,17 @@ def _contains_unsafe_gateway_action(
                 )
             continue
         resolved = _resolve_lenient(script_path)
-        if resolved in visited:
+        modes = visited.setdefault(resolved, set())
+        mode = (candidate_executed, forced_shell)
+        if mode in modes:
             continue
-        if not budget.charge_path():
+        if not modes and not budget.charge_path():
             if candidate_executed:
                 return _budget_exhausted(budget, "paths", depth)
             break  # remaining candidates are all mentions
-        visited.add(resolved)
+        # Each execution mode needs its own scan: a direct Node visit cannot
+        # suppress a later explicit shell invocation or an executed reference.
+        modes.add(mode)
         # Never read more than the walk can still afford to tokenize; a file larger than the
         # remainder fails closed exactly like an oversized one.
         script_text, unsafe = _read_referenced_script(script_path, max_bytes=budget.bytes_remaining)
@@ -1176,7 +1184,10 @@ def _contains_unsafe_gateway_action(
         if not script_text:
             continue
         # Relative references inside a script resolve against that script's directory, not the cwd.
-        if recurse(script_text, _resolve_script_directory(str(resolved)) or cwd, candidate_executed):
+        if recurse(
+            script_text, _resolve_script_directory(str(resolved)) or cwd, candidate_executed,
+            shell_source=forced_shell or not uses_node_interpreter(script_text),
+        ):
             return True
     return False
 
@@ -1201,7 +1212,7 @@ def scan_gateway_lifecycle(
     budget = _LifecycleScanBudget()
     try:
         unsafe = _contains_unsafe_gateway_action(
-            command, cwd=cwd, depth=0, visited=set(), budget=budget,
+            command, cwd=cwd, depth=0, visited={}, budget=budget,
             read_remote_script=read_remote_script,
         )
         return unsafe, budget.refusal if unsafe else None
